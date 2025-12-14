@@ -4,6 +4,9 @@ import { AnalysisResult, AppState, TerminalLog } from './types';
 import { analyzeImage } from './services/gemini';
 import { Terminal } from './components/Terminal';
 
+// Imagem de "Rosto Maligno/Demoníaco" para o efeito de Jump Scare
+const EVIL_FACE_URL = "https://images.unsplash.com/photo-1580718559078-43890f845025?q=80&w=1000&auto=format&fit=crop";
+
 // --- Social Proof Component ---
 const SocialToast = () => {
     const [toast, setToast] = useState<{name: string, loc: string, action: string} | null>(null);
@@ -126,10 +129,10 @@ const App: React.FC = () => {
             navigator.vibrate(steps[i].vibrate);
         }
 
-        // Screen Shake Logic (iOS/Visual impact)
+        // Screen Shake Logic (iOS/Visual impact) + DEMON IMAGE TRIGGER
         if (steps[i].shake) {
             setShaking(true);
-            setTimeout(() => setShaking(false), 600);
+            setTimeout(() => setShaking(false), 800); // Slightly longer shake for the effect
         }
     }
 
@@ -353,9 +356,9 @@ const App: React.FC = () => {
         <div className="relative w-64 h-64 md:w-80 md:h-80 mb-8 border-2 border-cyber-purple overflow-hidden rounded-lg shadow-[0_0_50px_rgba(138,43,226,0.2)]">
             {selectedImage && (
                 <img 
-                    src={selectedImage} 
+                    src={shaking ? EVIL_FACE_URL : selectedImage} 
                     alt="Target" 
-                    className="w-full h-full object-cover grayscale contrast-125"
+                    className={`w-full h-full object-cover grayscale contrast-125 transition-transform duration-100 ${shaking ? 'scale-125 sepia-0 invert-0' : ''}`}
                 />
             )}
             <div className="absolute inset-0 bg-green-500/10 z-10 mix-blend-overlay"></div>
