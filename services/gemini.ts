@@ -1,7 +1,7 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { AnalysisResult } from "../types";
 
-const SYSTEM_PROMPT = `
+const SYSTEM_PROMPT_TEASER = `
 ATUE COMO: Um Especialista em Fisiognomonia, Micro-expressões Faciais e Psicologia Comportamental Forense.
 
 TAREFA: Analise a imagem anexada. Gere um "Dossiê de Personalidade TrueSight" agressivo, direto e baseado em probabilidades.
@@ -29,27 +29,35 @@ Tom de voz: Científico, frio, analítico e "Black Mirror".
 IMPORTANTE:
 - Adicione o seguinte disclaimer no final da análise: "Nota: Análise baseada em padrões visuais e probabilidades estatísticas, não constitui diagnóstico clínico."
 - Você DEVE estruturar a resposta EXATAMENTE no formato JSON solicitado abaixo.
-- No campo 'red_flags', liste os "Pontos Sombrios" e riscos altos detectados.
-- No campo 'analise_detalhada', combine a análise dos olhos, micro-expressões e o veredito final em um texto coeso.
 `;
 
-export const analyzeImage = async (base64Image: string): Promise<AnalysisResult> => {
+const SYSTEM_PROMPT_REAL = `
+Analise esta face e procure traços de agressividade, narcisismo e infidelidade. Seja técnico e direto. Responda em tópicos.
+`;
+
+export const analyzeImage = async (base64Image: string, isRealAnalysis: boolean = false): Promise<AnalysisResult> => {
   try {
     const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
     
     // Clean base64 string if it contains metadata
     const cleanBase64 = base64Image.replace(/^data:image\/(png|jpg|jpeg|webp);base64,/, "");
 
+    const prompt = isRealAnalysis 
+        ? "Analise esta face e procure traços de agressividade, narcisismo e infidelidade. Seja técnico e direto. Responda em tópicos. Formate a saída como JSON compatível com a estrutura solicitada."
+        : "Gere o Dossiê de Personalidade TrueSight para esta face seguindo rigorosamente as instruções de sistema.";
+
+    const systemInstruction = isRealAnalysis ? SYSTEM_PROMPT_REAL : SYSTEM_PROMPT_TEASER;
+
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
       contents: {
         parts: [
             { inlineData: { mimeType: 'image/jpeg', data: cleanBase64 } },
-            { text: "Gere o Dossiê de Personalidade TrueSight para esta face seguindo rigorosamente as instruções de sistema." }
+            { text: prompt }
         ]
       },
       config: {
-        systemInstruction: SYSTEM_PROMPT,
+        systemInstruction: systemInstruction,
         responseMimeType: "application/json",
         responseSchema: {
             type: Type.OBJECT,

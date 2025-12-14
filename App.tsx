@@ -1,8 +1,10 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Scan, Upload, Lock, ShieldAlert, Fingerprint, BrainCircuit, AlertTriangle, CloudUpload, ScanFace, FileWarning, ArrowLeft, Unlock, CheckCircle } from 'lucide-react';
-import { AnalysisResult, AppState, TerminalLog } from './types';
+import { Scan, Upload, Lock, ShieldAlert, Fingerprint, BrainCircuit, AlertTriangle, CloudUpload, ScanFace, FileWarning, ArrowLeft, Unlock, CheckCircle, LogIn, Zap, User as UserIcon, X, Search, Settings, Save } from 'lucide-react';
+import { AnalysisResult, AppState, TerminalLog, User } from './types';
 import { analyzeImage } from './services/gemini';
 import { Terminal } from './components/Terminal';
+import { db } from './services/firebase';
+import { collection, query, where, getDocs, updateDoc, doc } from 'firebase/firestore';
 
 // Imagem de "Rosto Maligno/Demoníaco" para o efeito de Jump Scare
 const EVIL_FACE_URL = "https://images.unsplash.com/photo-1580718559078-43890f845025?q=80&w=1000&auto=format&fit=crop";
@@ -67,17 +69,27 @@ const App: React.FC = () => {
   const [scanProgress, setScanProgress] = useState(0);
   const [shaking, setShaking] = useState(false); // iOS Screen Shake State
   const fileInputRef = useRef<HTMLInputElement>(null);
+  
+  // Auth State
+  const [user, setUser] = useState<User | null>(null);
+  const [loginEmail, setLoginEmail] = useState("");
+  const [loginPass, setLoginPass] = useState("");
+  const [loginError, setLoginError] = useState("");
+  const [loadingLogin, setLoadingLogin] = useState(false);
+  const [analyzingReal, setAnalyzingReal] = useState(false);
+  
+  // Settings / Password Change State
+  const [showSettings, setShowSettings] = useState(false);
+  const [newPassword, setNewPassword] = useState("");
+  const [saveMessage, setSaveMessage] = useState("");
+
+  const isAdmin = user?.email === 'thor4tech@gmail.com';
 
   // --- Actions ---
 
   const handleStart = () => {
-    // Directly open file selector if on mobile, or go to upload screen
-    if (window.innerWidth < 768) {
-        fileInputRef.current?.click();
-    } else {
-        setAppState('UPLOAD');
-        window.scrollTo({ top: 0, behavior: 'smooth' });
-    }
+    setAppState('UPLOAD');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -88,7 +100,14 @@ const App: React.FC = () => {
       reader.onloadend = () => {
         const base64 = reader.result as string;
         setSelectedImage(base64);
-        startAnalysis(base64);
+        
+        if (appState === 'DASHBOARD') {
+            // In dashboard mode, we just set the image, don't auto start fake analysis
+            setAnalysis(null);
+        } else {
+            // Landing page flow -> Scanning -> Sales Page
+            startAnalysis(base64);
+        }
       };
       reader.readAsDataURL(file);
     }
@@ -114,8 +133,8 @@ const App: React.FC = () => {
         { progress: 100, msg: "Compilando relatório final...", vibrate: [50] }
     ];
 
-    // Trigger API call in parallel
-    const apiPromise = analyzeImage(base64);
+    // Trigger API call in parallel (Fake mode)
+    const apiPromise = analyzeImage(base64, false);
 
     // Play animation logs
     for (let i = 0; i < steps.length; i++) {
@@ -145,6 +164,112 @@ const App: React.FC = () => {
         addLog("ERRO CRÍTICO NO SISTEMA.");
         console.error(e);
     }
+  };
+
+  const handleLogin = async (e: React.FormEvent) => {
+      e.preventDefault();
+      setLoadingLogin(true);
+      setLoginError("");
+
+      try {
+          // Lógica de Admin Hardcoded para testes se o banco falhar, 
+          // mas idealmente ele deve existir no banco também.
+          if (loginEmail === 'thor4tech@gmail.com') {
+              // Pass through to query logic, but keep in mind rights are handled by 'isAdmin' const
+          }
+
+          const q = query(
+              collection(db, "users"),
+              where("email", "==", loginEmail),
+              where("senha", "==", loginPass)
+          );
+
+          const querySnapshot = await getDocs(q);
+
+          if (querySnapshot.empty) {
+              throw new Error("Credenciais inválidas ou usuário não encontrado.");
+          }
+
+          const userDoc = querySnapshot.docs[0];
+          const userData = { id: userDoc.id, ...userDoc.data() } as User;
+
+          // Admin não precisa de créditos > 0
+          if (userData.email !== 'thor4tech@gmail.com' && userData.credits <= 0) {
+              alert("Sem créditos. Faça uma recarga.");
+              window.location.href = "https://pay.kiwify.com.br/RVDacih"; // Link do seu checkout
+              setLoadingLogin(false);
+              return;
+          }
+
+          setUser(userData);
+          setAppState('DASHBOARD');
+      } catch (err: any) {
+          console.error("Login error object:", err);
+          
+          if (err.code === 'permission-denied' || err.message?.includes("Missing or insufficient permissions")) {
+              setLoginError("ERRO DE PERMISSÃO: Verifique as 'Firestore Rules' no Console do Firebase. Elas devem permitir leitura pública para este modo de login manual.");
+          } else {
+              setLoginError(err.message || "Erro ao conectar ao servidor.");
+          }
+      } finally {
+          setLoadingLogin(false);
+      }
+  };
+
+  const handleRealAnalysis = async () => {
+      if (!selectedImage || !user) return;
+      
+      // Admin bypass credit check
+      if (!isAdmin && user.credits <= 0) return;
+      
+      setAnalyzingReal(true);
+      
+      try {
+          // 1. Call AI
+          const result = await analyzeImage(selectedImage, true);
+          
+          // 2. Debit Credit (Skip if Admin)
+          let newCredits = user.credits;
+          if (!isAdmin) {
+            const userRef = doc(db, "users", user.id);
+            newCredits = user.credits - 1;
+            await updateDoc(userRef, { credits: newCredits });
+          }
+          
+          // 3. Update Local State
+          setUser({ ...user, credits: newCredits });
+          setAnalysis(result);
+      } catch (err: any) {
+          console.error(err);
+          alert("Falha na análise: " + err.message);
+      } finally {
+          setAnalyzingReal(false);
+      }
+  };
+
+  const handleChangePassword = async (e: React.FormEvent) => {
+      e.preventDefault();
+      if (!user || !newPassword) return;
+
+      try {
+          const userRef = doc(db, "users", user.id);
+          await updateDoc(userRef, { senha: newPassword });
+          setUser({ ...user, senha: newPassword } as any); // Update local state mostly for consistency
+          setNewPassword("");
+          setSaveMessage("Senha alterada com sucesso!");
+          setTimeout(() => setSaveMessage(""), 3000);
+      } catch (err: any) {
+          console.error(err);
+          setSaveMessage("Erro ao salvar senha.");
+      }
+  };
+
+  const handleLogout = () => {
+      setUser(null);
+      setAppState('LANDING');
+      setSelectedImage(null);
+      setAnalysis(null);
+      setShowSettings(false);
   };
 
   // --- Sub-components ---
@@ -187,7 +312,20 @@ const App: React.FC = () => {
           className="hidden"
       />
 
-      <div className="z-10 text-center max-w-5xl mx-auto space-y-8 relative">
+      <nav className="absolute top-0 w-full p-6 flex justify-between items-center z-20">
+          <div className="flex items-center gap-2">
+              <Scan className="text-cyber-green w-6 h-6" />
+              <span className="font-mono font-bold text-lg tracking-widest text-white">TRUESIGHT_AI</span>
+          </div>
+          <button 
+              onClick={() => setAppState('LOGIN')}
+              className="border border-white/20 px-4 py-2 rounded text-xs font-mono text-white hover:bg-white/10 transition-all hover:border-cyber-green hover:text-cyber-green flex items-center gap-2"
+          >
+              <UserIcon className="w-4 h-4" /> ÁREA DE MEMBROS
+          </button>
+      </nav>
+
+      <div className="z-10 text-center max-w-5xl mx-auto space-y-8 relative mt-20">
         <div className="absolute -top-20 left-1/2 -translate-x-1/2 w-[500px] h-[500px] bg-cyber-purple/20 blur-[100px] rounded-full pointer-events-none"></div>
 
         <h1 className="text-5xl md:text-8xl font-bold tracking-tighter leading-none glitch text-white drop-shadow-[0_0_10px_rgba(255,255,255,0.3)]" data-text="O ROSTO NÃO MENTE">
@@ -248,6 +386,224 @@ const App: React.FC = () => {
       </div>
       <SocialToast />
     </div>
+  );
+
+  const renderLogin = () => (
+      <div className="min-h-screen flex items-center justify-center p-6 bg-black relative">
+          <div className="absolute top-4 left-4 cursor-pointer text-cyber-subtext hover:text-white flex items-center gap-2" onClick={() => setAppState('LANDING')}>
+              <ArrowLeft className="w-4 h-4" /> VOLTAR
+          </div>
+          <div className="absolute inset-0 bg-[url('https://images.unsplash.com/photo-1518544806308-c8f325ccb7cc?q=80&w=2000')] bg-cover opacity-10 pointer-events-none"></div>
+          
+          <div className="w-full max-w-md bg-cyber-panel border-t-4 border-cyber-green p-8 rounded-xl relative z-10 shadow-2xl backdrop-blur-xl bg-opacity-90">
+              <div className="flex justify-between items-start mb-8">
+                  <h2 className="text-3xl font-bold font-mono text-cyber-green">SYSTEM_LOGIN</h2>
+              </div>
+
+              <form onSubmit={handleLogin} className="space-y-6">
+                  <div>
+                      <label className="block text-xs font-mono text-gray-400 mb-2">IDENTIFICADOR (EMAIL)</label>
+                      <input 
+                          type="email" 
+                          value={loginEmail}
+                          onChange={(e) => setLoginEmail(e.target.value)}
+                          className="w-full bg-black/50 border border-gray-700 p-3 rounded focus:border-cyber-green focus:outline-none text-white font-mono"
+                          placeholder="agente@truesight.ai"
+                          required
+                      />
+                  </div>
+                  <div>
+                      <label className="block text-xs font-mono text-gray-400 mb-2">CHAVE DE ACESSO (SENHA)</label>
+                      <input 
+                          type="password" 
+                          value={loginPass}
+                          onChange={(e) => setLoginPass(e.target.value)}
+                          className="w-full bg-black/50 border border-gray-700 p-3 rounded focus:border-cyber-green focus:outline-none text-white font-mono"
+                          placeholder="••••••••"
+                          required
+                      />
+                  </div>
+
+                  {loginError && (
+                      <div className="p-3 bg-red-900/30 border border-cyber-red text-cyber-red text-xs font-mono flex items-center gap-2">
+                          <AlertTriangle className="w-4 h-4" />
+                          {loginError}
+                      </div>
+                  )}
+
+                  <button 
+                      type="submit" 
+                      disabled={loadingLogin}
+                      className="w-full bg-cyber-green hover:bg-[#00cc76] text-black font-bold py-3 rounded transition-colors font-mono disabled:opacity-50 disabled:cursor-not-allowed flex justify-center items-center gap-2"
+                  >
+                      {loadingLogin ? "AUTENTICANDO..." : "ACESSAR SISTEMA [ENTER]"}
+                      {!loadingLogin && <LogIn className="w-4 h-4" />}
+                  </button>
+              </form>
+          </div>
+      </div>
+  );
+
+  const renderDashboard = () => (
+      <div className="min-h-screen bg-black text-white p-4 font-sans relative">
+          <header className="flex justify-between items-center mb-8 border-b border-gray-800 pb-4 max-w-6xl mx-auto pt-4">
+              <div className="flex flex-col">
+                  <span className="text-cyber-green font-mono font-bold text-lg tracking-wider">TRUESIGHT_V3</span>
+                  <span className="text-xs text-gray-500">{user?.email}</span>
+              </div>
+              <div className="flex items-center gap-6">
+                  <div className="bg-gray-900 border border-gray-700 px-4 py-2 rounded flex items-center gap-2">
+                      <Zap className="text-yellow-400 w-4 h-4" />
+                      <span className="font-mono font-bold text-white">
+                        {isAdmin ? '∞ INFINITO' : `${user?.credits} CRÉDITOS`}
+                      </span>
+                  </div>
+                  <button onClick={() => setShowSettings(!showSettings)} className="text-gray-400 hover:text-white transition-colors">
+                      <Settings className="w-5 h-5" />
+                  </button>
+                  <button onClick={handleLogout} className="text-xs text-cyber-red hover:text-red-400 font-mono">SAIR</button>
+              </div>
+          </header>
+
+          {/* Settings Modal */}
+          {showSettings && (
+              <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
+                  <div className="bg-cyber-panel border border-cyber-purple p-6 rounded-xl w-full max-w-sm relative">
+                      <button onClick={() => setShowSettings(false)} className="absolute top-4 right-4 text-gray-500 hover:text-white">
+                          <X className="w-5 h-5" />
+                      </button>
+                      <h3 className="text-xl font-mono text-cyber-purple mb-4 flex items-center gap-2">
+                          <Settings className="w-5 h-5" /> CONFIGURAÇÕES
+                      </h3>
+                      <form onSubmit={handleChangePassword} className="space-y-4">
+                          <div>
+                              <label className="block text-xs font-mono text-gray-400 mb-2">NOVA SENHA</label>
+                              <input 
+                                  type="password"
+                                  value={newPassword}
+                                  onChange={(e) => setNewPassword(e.target.value)}
+                                  placeholder="Digite a nova senha"
+                                  className="w-full bg-black border border-gray-700 p-2 rounded text-white focus:border-cyber-purple outline-none"
+                              />
+                          </div>
+                          <button type="submit" className="w-full bg-cyber-purple text-black font-bold py-2 rounded hover:bg-purple-500 transition-colors flex items-center justify-center gap-2">
+                              <Save className="w-4 h-4" /> SALVAR ALTERAÇÃO
+                          </button>
+                          {saveMessage && <p className="text-center text-xs text-cyber-green font-mono">{saveMessage}</p>}
+                      </form>
+                  </div>
+              </div>
+          )}
+
+          <div className="max-w-4xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-8">
+              {/* Coluna Esquerda: Upload e Preview */}
+              <div className="space-y-6">
+                  <div className="border-2 border-dashed border-gray-700 rounded-xl p-8 flex flex-col items-center justify-center min-h-[300px] relative bg-gray-900/20 hover:border-cyber-green transition-colors cursor-pointer group">
+                      <input 
+                          type="file" 
+                          onChange={handleFileChange} 
+                          accept="image/*"
+                          className="absolute inset-0 opacity-0 cursor-pointer z-10"
+                      />
+                      {selectedImage ? (
+                          <img src={selectedImage} className="max-h-[250px] rounded shadow-lg object-cover" alt="Preview" />
+                      ) : (
+                          <>
+                              <ScanFace className="w-16 h-16 text-gray-600 group-hover:text-cyber-green mb-4 transition-colors" />
+                              <p className="text-gray-400 font-mono text-sm">ARRASTE A FOTO DO ALVO</p>
+                          </>
+                      )}
+                  </div>
+
+                  <button 
+                      onClick={handleRealAnalysis}
+                      disabled={!selectedImage || analyzingReal || (!isAdmin && (user?.credits || 0) <= 0)}
+                      className="w-full bg-cyber-red hover:bg-red-600 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold py-4 rounded shadow-[0_0_15px_rgba(220,20,60,0.4)] transition-all font-mono tracking-wider flex justify-center items-center gap-2"
+                  >
+                      {analyzingReal ? (
+                          <span className="animate-pulse">DECODIFICANDO MATRIZ...</span>
+                      ) : (
+                          <>
+                              <Search className="w-5 h-5" /> EXECUTAR ANÁLISE {isAdmin ? '' : '(-1 CRÉDITO)'}
+                          </>
+                      )}
+                  </button>
+                  
+                  {!isAdmin && (user?.credits || 0) <= 0 && (
+                      <p className="text-cyber-red text-xs font-mono text-center">Saldo insuficiente. Recarregue para continuar.</p>
+                  )}
+              </div>
+
+              {/* Coluna Direita: Resultado */}
+              <div className="bg-[#0a0a0a] rounded-xl p-6 min-h-[400px] relative overflow-hidden border border-gray-800">
+                  <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-cyber-green to-transparent opacity-50"></div>
+                  
+                  {!analysis && !analyzingReal && (
+                      <div className="h-full flex flex-col items-center justify-center text-gray-600 opacity-50">
+                          <Lock className="w-12 h-12 mb-2" />
+                          <p className="font-mono text-sm">AGUARDANDO DADOS BIOMÉTRICOS</p>
+                      </div>
+                  )}
+
+                  {analyzingReal && (
+                      <div className="h-full flex flex-col items-center justify-center space-y-4">
+                          <div className="w-16 h-16 border-4 border-cyber-green border-t-transparent rounded-full animate-spin"></div>
+                          <div className="font-mono text-cyber-green text-xs animate-pulse text-center">
+                              <p>Mapeando micro-expressões...</p>
+                              <p>Comparando com base de dados forense...</p>
+                              <p>Gerando dossiê de personalidade...</p>
+                          </div>
+                      </div>
+                  )}
+
+                  {analysis && (
+                      <div className="animate-slide-up h-full overflow-y-auto">
+                          <div className="flex items-center gap-2 mb-4 border-b border-gray-700 pb-2">
+                              <FileWarning className="text-cyber-green w-5 h-5" />
+                              <h3 className="font-mono font-bold text-cyber-green">DOSSIÊ GERADO</h3>
+                          </div>
+                          
+                          <div className="space-y-4">
+                              <div className="bg-gray-900 p-3 rounded border-l-2 border-cyber-red">
+                                  <span className="text-xs text-gray-500 block">PERFIL</span>
+                                  <span className="text-white font-bold">{analysis.titulo_principal}</span>
+                              </div>
+
+                              <div className="flex justify-between items-center bg-gray-900 p-3 rounded">
+                                  <span className="text-xs text-gray-500">CONFIABILIDADE</span>
+                                  <span className={`text-xl font-bold font-mono ${analysis.pontuacao_confiabilidade < 50 ? 'text-cyber-red' : 'text-cyber-green'}`}>
+                                      {analysis.pontuacao_confiabilidade}%
+                                  </span>
+                              </div>
+
+                              <div>
+                                  <span className="text-xs text-gray-500 block mb-2">RED FLAGS</span>
+                                  <div className="space-y-2">
+                                      {analysis.red_flags.map((flag, i) => (
+                                          <div key={i} className="text-xs bg-red-900/20 text-red-200 p-2 rounded border border-red-900/50 flex items-start gap-2">
+                                              <AlertTriangle className="w-3 h-3 shrink-0 mt-0.5" />
+                                              {flag}
+                                          </div>
+                                      ))}
+                                  </div>
+                              </div>
+
+                              <div>
+                                  <span className="text-xs text-gray-500 block mb-2">ANÁLISE DETALHADA</span>
+                                  <p className="text-sm text-gray-300 font-mono leading-relaxed whitespace-pre-wrap">
+                                      {analysis.analise_detalhada}
+                                  </p>
+                              </div>
+                          </div>
+
+                          <div className="mt-6 p-3 bg-red-900/10 border border-red-900/30 rounded text-[10px] text-gray-500 text-center">
+                              NOTA: ESTA ANÁLISE É BASEADA EM PROBABILIDADES DE IA. NÃO CONSTITUI DIAGNÓSTICO CLÍNICO.
+                          </div>
+                      </div>
+                  )}
+              </div>
+          </div>
+      </div>
   );
 
   const renderHowItWorks = () => (
@@ -324,200 +680,155 @@ const App: React.FC = () => {
   );
 
   const renderUpload = () => (
-    <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-black relative">
-        <div className="absolute top-4 left-4 cursor-pointer text-cyber-subtext hover:text-white flex items-center gap-2" onClick={() => setAppState('LANDING')}>
+    <div className="min-h-screen bg-black flex flex-col items-center justify-center p-6 relative">
+        <button onClick={() => setAppState('LANDING')} className="absolute top-6 left-6 text-gray-500 hover:text-white flex items-center gap-2 font-mono text-sm">
             <ArrowLeft className="w-4 h-4" /> VOLTAR
-        </div>
-        <div className="w-full max-w-xl border-2 border-dashed border-cyber-subtext/30 hover:border-cyber-purple bg-cyber-panel rounded-xl p-12 flex flex-col items-center justify-center transition-all group relative overflow-hidden">
-            <input 
-                type="file" 
-                ref={fileInputRef}
-                onChange={handleFileChange}
-                accept="image/*" 
-                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-20"
-            />
-            <div className="w-20 h-20 bg-cyber-dark rounded-full flex items-center justify-center mb-6 group-hover:scale-110 transition-transform z-10">
-                <Upload className="w-10 h-10 text-cyber-purple" />
+        </button>
+        
+        <div className="w-full max-w-xl text-center space-y-8">
+            <ScanFace className="w-20 h-20 text-cyber-purple mx-auto animate-pulse" />
+            <h2 className="text-3xl md:text-5xl font-mono font-bold text-white glitch" data-text="UPLOAD_ALVO">UPLOAD_ALVO</h2>
+            <p className="text-gray-400 font-mono text-sm">A I.A. precisa de uma foto clara do rosto. Óculos escuros podem interferir na leitura biométrica.</p>
+            
+            {/* Added onClick wrapper to ensure clicking the box triggers the hidden input */}
+            <div 
+                className="border-2 border-dashed border-gray-800 hover:border-cyber-green bg-gray-900/30 rounded-2xl p-12 transition-all cursor-pointer group relative overflow-hidden"
+                onClick={() => fileInputRef.current?.click()}
+            >
+                <input 
+                    type="file" 
+                    ref={fileInputRef}
+                    onChange={handleFileChange}
+                    accept="image/*" 
+                    className="hidden"
+                />
+                <div className="absolute inset-0 bg-cyber-green/5 scale-0 group-hover:scale-100 transition-transform rounded-2xl"></div>
+                <CloudUpload className="w-16 h-16 text-gray-600 group-hover:text-cyber-green mx-auto mb-4 transition-colors" />
+                <p className="font-bold text-white mb-2">CLIQUE PARA CARREGAR FOTO</p>
+                <p className="text-xs text-gray-500 font-mono">JPG, PNG ou WEBP (Max 5MB)</p>
             </div>
-            <h3 className="text-xl font-mono text-white mb-2 z-10">CARREGUE A FOTO DO ALVO</h3>
-            <p className="text-cyber-subtext text-sm text-center z-10">Rosto frontal e claro. Apenas JPG/PNG.</p>
         </div>
     </div>
   );
 
   const renderScanning = () => (
-    <div className={`min-h-screen flex flex-col items-center justify-center p-6 bg-black transition-all duration-300 ${shaking ? 'shake-screen bg-red-950/20' : ''}`}>
+    <div className={`min-h-screen bg-black flex flex-col items-center justify-center p-6 relative overflow-hidden ${shaking ? 'animate-shake' : ''}`}>
+        {/* Background Grid */}
+        <div className="absolute inset-0 cyber-grid opacity-20 pointer-events-none"></div>
         
-        {/* Shaking Red Overlay Alert */}
+        {/* Demon Face Flash Effect */}
         {shaking && (
-            <div className="fixed inset-0 border-[20px] border-cyber-red pointer-events-none z-50 animate-pulse opacity-50"></div>
+            <div className="absolute inset-0 z-50 flex items-center justify-center bg-black">
+                 <img src={EVIL_FACE_URL} className="w-full h-full object-cover opacity-50 mix-blend-overlay animate-pulse" alt="anomaly" />
+            </div>
         )}
 
-        <div className="relative w-64 h-64 md:w-80 md:h-80 mb-8 border-2 border-cyber-purple overflow-hidden rounded-lg shadow-[0_0_50px_rgba(138,43,226,0.2)]">
-            {selectedImage && (
-                <img 
-                    src={shaking ? EVIL_FACE_URL : selectedImage} 
-                    alt="Target" 
-                    className={`w-full h-full object-cover grayscale contrast-125 transition-transform duration-100 ${shaking ? 'scale-125 sepia-0 invert-0' : ''}`}
-                />
-            )}
-            <div className="absolute inset-0 bg-green-500/10 z-10 mix-blend-overlay"></div>
-            {/* Moving Scanner Bar */}
-            <div className="absolute top-0 left-0 w-full h-1 bg-cyber-purple shadow-[0_0_20px_#8A2BE2,0_0_10px_#fff] animate-[scanline_1.5s_linear_infinite] z-20"></div>
-            
-            {/* Grid Overlay */}
-            <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(138,43,226,0.2)_1px,transparent_1px),linear-gradient(rgba(138,43,226,0.2)_1px,transparent_1px)] bg-[size:20px_20px] z-10 pointer-events-none"></div>
-        </div>
+        <div className="w-full max-w-lg space-y-6 relative z-10">
+            <div className="relative aspect-square max-w-xs mx-auto rounded-xl overflow-hidden border-2 border-cyber-green shadow-[0_0_30px_rgba(0,255,148,0.2)]">
+                {selectedImage && (
+                    <img src={selectedImage} alt="Scanning" className="w-full h-full object-cover filter grayscale contrast-125" />
+                )}
+                {/* Scanning Laser */}
+                <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-b from-transparent via-cyber-green/50 to-transparent h-2 animate-scan"></div>
+                
+                {/* Face Markers Overlay */}
+                <div className="absolute top-1/3 left-1/4 w-2 h-2 bg-red-500 rounded-full animate-ping"></div>
+                <div className="absolute top-1/3 right-1/4 w-2 h-2 bg-red-500 rounded-full animate-ping delay-100"></div>
+                <div className="absolute bottom-1/3 left-1/2 w-2 h-2 bg-red-500 rounded-full animate-ping delay-200"></div>
+            </div>
 
-        <Terminal logs={logs} />
-        
-        <div className="w-full max-w-lg mt-4 h-1 bg-cyber-dark rounded-full overflow-hidden">
-            <div 
-                className="h-full bg-cyber-purple transition-all duration-300" 
-                style={{ width: `${scanProgress}%` }}
-            ></div>
+            <div className="space-y-2">
+                <div className="flex justify-between text-xs font-mono text-cyber-green">
+                    <span>PROGRESSO_VARREDURA</span>
+                    <span>{scanProgress}%</span>
+                </div>
+                <div className="h-2 bg-gray-900 rounded-full overflow-hidden border border-gray-800">
+                    <div 
+                        className="h-full bg-cyber-green shadow-[0_0_10px_#00FF94] transition-all duration-300 ease-out"
+                        style={{ width: `${scanProgress}%` }}
+                    ></div>
+                </div>
+            </div>
+
+            <Terminal logs={logs} />
         </div>
-        <p className="text-cyber-green font-mono text-xs mt-2 animate-pulse">PROCESSANDO BIOMETRIA...</p>
     </div>
   );
 
   const renderLockedResult = () => (
-    <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-[#050000] relative">
-        {/* Flashing Red Background Effect */}
-        <div className="absolute inset-0 bg-red-900/10 animate-pulse pointer-events-none"></div>
+    <div className="min-h-screen bg-black flex flex-col items-center justify-center p-6 relative">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-red-900/20 via-black to-black pointer-events-none"></div>
 
-        <div className="max-w-2xl w-full z-10 flex flex-col items-center">
-            <div className="flex items-center gap-3 mb-6 animate-bounce">
-                <AlertTriangle className="w-10 h-10 text-cyber-red" />
-                <h2 className="text-2xl md:text-3xl font-mono text-cyber-red font-bold">
-                    ANÁLISE CONCLUÍDA
-                </h2>
-                <AlertTriangle className="w-10 h-10 text-cyber-red" />
+        <div className="w-full max-w-2xl bg-[#0a0a0a] border border-red-900/50 rounded-2xl p-1 relative overflow-hidden shadow-2xl">
+            {/* Warning Header */}
+            <div className="bg-red-900/20 border-b border-red-900/30 p-4 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                    <ShieldAlert className="text-red-500 w-6 h-6 animate-pulse" />
+                    <span className="font-mono font-bold text-red-500 tracking-widest">ALERTA DE RISCO DETECTADO</span>
+                </div>
+                <span className="text-[10px] font-mono text-red-400 border border-red-900 px-2 py-1 rounded">CONFIDENCIAL</span>
             </div>
 
-            <div className="relative w-40 h-40 md:w-48 md:h-48 rounded-full overflow-hidden border-4 border-cyber-red mb-8 shadow-[0_0_40px_rgba(220,20,60,0.4)]">
-                {selectedImage && (
-                    <img 
-                        src={selectedImage} 
-                        alt="Target" 
-                        className="w-full h-full object-cover grayscale blur-sm" 
-                    />
-                )}
-                <div className="absolute inset-0 flex items-center justify-center bg-black/40">
-                    <Lock className="w-16 h-16 text-white" />
+            <div className="p-6 md:p-8 space-y-8">
+                <div className="flex flex-col md:flex-row gap-8 items-center md:items-start">
+                    {/* Blurry Image */}
+                    <div className="relative w-32 h-32 md:w-40 md:h-40 shrink-0">
+                        {selectedImage && (
+                            <img src={selectedImage} className="w-full h-full object-cover rounded-lg blur-sm opacity-50" alt="Target" />
+                        )}
+                        <div className="absolute inset-0 flex items-center justify-center">
+                            <Lock className="text-white w-10 h-10" />
+                        </div>
+                    </div>
+
+                    {/* Teaser Text */}
+                    <div className="space-y-4 text-center md:text-left">
+                        <h3 className="text-2xl font-bold text-white">{analysis?.titulo_principal || "ANÁLISE CONCLUÍDA"}</h3>
+                        <p className="text-gray-400 text-sm font-mono leading-relaxed">
+                            O sistema detectou <span className="text-red-500 font-bold">{analysis?.red_flags.length || 3} micro-sinais de comportamento oculto</span>. 
+                            A análise completa contém detalhes sensíveis sobre tendências de <span className="text-white">narcisismo, infidelidade e manipulação</span>.
+                        </p>
+                        
+                        <div className="bg-black/50 p-4 rounded border border-gray-800">
+                             <div className="flex items-center justify-between text-xs font-mono mb-2">
+                                <span className="text-gray-500">NÍVEL DE AMEAÇA</span>
+                                <span className="text-red-500 font-bold animate-pulse">ALTO</span>
+                             </div>
+                             <div className="w-full bg-gray-800 h-1.5 rounded-full">
+                                 <div className="w-[85%] h-full bg-red-600 rounded-full shadow-[0_0_10px_red]"></div>
+                             </div>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Paywall / Unlock Section */}
+                <div className="border-t border-gray-800 pt-8 space-y-6">
+                    <div className="flex flex-col gap-3">
+                        <button 
+                            onClick={() => window.location.href = "https://pay.kiwify.com.br/RVDacih"}
+                            className="w-full bg-cyber-green hover:bg-[#00cc76] text-black font-bold py-4 rounded-xl text-lg uppercase tracking-widest shadow-[0_0_20px_rgba(0,255,148,0.4)] hover:shadow-[0_0_30px_rgba(0,255,148,0.6)] transition-all flex items-center justify-center gap-3 animate-pulse"
+                        >
+                            <Unlock className="w-6 h-6" /> DESBLOQUEAR POR R$ 17,90
+                        </button>
+                        <p className="text-[10px] text-center text-gray-500 font-mono">Oferta por tempo limitado. Receba 3 créditos de análise.</p>
+                    </div>
+
+                    <div className="text-center">
+                        <button onClick={() => setAppState('LOGIN')} className="text-xs text-gray-500 underline hover:text-white transition-colors">
+                            Já sou membro? Fazer Login
+                        </button>
+                    </div>
                 </div>
             </div>
-
-            <div className="bg-[#1a0505] border border-cyber-red p-6 rounded-lg w-full text-center mb-8 relative overflow-hidden">
-                 <h3 className="text-xl text-white font-bold mb-2 relative z-10">3 RED FLAGS CRÍTICAS DETECTADAS</h3>
-                 <p className="text-cyber-subtext text-sm relative z-10">
-                     A IA identificou padrões de micro-expressão preocupantes nesta pessoa. O relatório completo contém informações sensíveis.
-                 </p>
-                 
-                 {/* Blurred "Fake" Data for Curiosity */}
-                 <div className="absolute inset-0 top-20 opacity-20 filter blur-sm pointer-events-none">
-                    <div className="flex justify-between px-10 mt-2 text-cyber-red font-mono text-xs"><span>NARCISISMO</span><span>98%</span></div>
-                    <div className="flex justify-between px-10 mt-2 text-cyber-red font-mono text-xs"><span>INFIDELIDADE</span><span>ALTO</span></div>
-                    <div className="flex justify-between px-10 mt-2 text-cyber-red font-mono text-xs"><span>AGRESSIVIDADE</span><span>MÉDIO</span></div>
-                 </div>
-            </div>
-
-            <div className="w-full bg-cyber-dark p-6 rounded-t-xl border-t border-l border-r border-cyber-subtext/20 shadow-2xl">
-                 <div className="flex flex-col items-center">
-                     <p className="text-cyber-subtext line-through text-lg">R$ 49,90</p>
-                     <p className="text-4xl font-bold text-white mb-6">R$ 17,90 <span className="text-xs font-normal text-cyber-red ml-2">HOJE</span></p>
-                     
-                     <a 
-                        href="https://pay.kiwify.com.br/RVDacih"
-                        className="w-full py-5 bg-cyber-red hover:bg-red-700 text-white font-bold text-lg uppercase tracking-wider rounded-lg btn-danger-neon flex items-center justify-center gap-2 text-center animate-pulse"
-                     >
-                         <Unlock className="w-5 h-5" /> Desbloquear a Verdade
-                     </a>
-                     
-                     <div className="flex gap-4 mt-4 text-[#444] text-xs">
-                         <span className="flex items-center gap-1"><ShieldAlert className="w-3 h-3"/> Pagamento Seguro</span>
-                         <span className="flex items-center gap-1"><BrainCircuit className="w-3 h-3"/> Tecnologia Gemini</span>
-                     </div>
-                 </div>
-            </div>
-            <SocialToast />
         </div>
     </div>
   );
 
   const renderFinalResult = () => (
-    <div className="min-h-screen p-6 bg-black text-cyber-text">
-        <div className="max-w-3xl mx-auto border border-cyber-subtext/20 bg-cyber-panel rounded-xl overflow-hidden shadow-2xl">
-            <div className="bg-cyber-dark p-4 border-b border-cyber-subtext/20 flex justify-between items-center">
-                <span className="font-mono text-cyber-purple text-sm">DOSSIÊ #ALE-{new Date().getFullYear()}-{Math.floor(Math.random() * 99)}</span>
-                <span className="text-cyber-subtext text-xs uppercase">Confidencial</span>
-            </div>
-            
-            <div className="p-8">
-                <div className="flex flex-col md:flex-row gap-8 mb-8">
-                    <div className="w-32 h-32 md:w-40 md:h-40 shrink-0 border-2 border-cyber-purple rounded-lg overflow-hidden relative">
-                         {selectedImage && (
-                            <img 
-                                src={selectedImage} 
-                                alt="Target" 
-                                className="w-full h-full object-cover grayscale contrast-125" 
-                            />
-                        )}
-                        <div className="absolute bottom-0 w-full bg-cyber-purple text-black text-center text-xs font-bold py-1">ANALISADO</div>
-                    </div>
-                    <div>
-                        <h1 className="text-2xl md:text-3xl font-mono font-bold text-white mb-2 uppercase">
-                            "{analysis?.titulo_principal}"
-                        </h1>
-                        <div className="flex items-center gap-4 mt-4">
-                            <div className="flex flex-col">
-                                <span className="text-[10px] text-cyber-subtext uppercase">Confiabilidade</span>
-                                <div className="text-3xl font-mono font-bold text-cyber-red">
-                                    {analysis?.pontuacao_confiabilidade}%
-                                </div>
-                            </div>
-                            <div className="h-10 w-px bg-cyber-dark"></div>
-                             <div className="flex flex-col">
-                                <span className="text-[10px] text-cyber-subtext uppercase">Status</span>
-                                <div className="text-sm font-mono text-cyber-red font-bold border border-cyber-red px-2 py-1 rounded bg-cyber-red/10 mt-1">
-                                    ALERTA
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <div className="mb-8">
-                    <h3 className="text-cyber-purple font-mono text-lg mb-4 flex items-center gap-2">
-                        <AlertTriangle className="w-5 h-5" /> RED FLAGS DETECTADAS
-                    </h3>
-                    <div className="space-y-3">
-                        {analysis?.red_flags.map((flag, idx) => (
-                            <div key={idx} className="bg-[#1a0505] border-l-4 border-cyber-red p-4 text-sm text-[#ddd]">
-                                {flag}
-                            </div>
-                        ))}
-                    </div>
-                </div>
-
-                <div className="mb-8">
-                     <h3 className="text-cyber-purple font-mono text-lg mb-4 flex items-center gap-2">
-                        <Fingerprint className="w-5 h-5" /> ANÁLISE DETALHADA
-                    </h3>
-                    <p className="text-cyber-subtext leading-relaxed text-sm md:text-base border border-cyber-dark p-6 rounded bg-[#050505]">
-                        {analysis?.analise_detalhada}
-                    </p>
-                </div>
-
-                <button 
-                    onClick={() => { setAppState('LANDING'); setSelectedImage(null); setAnalysis(null); }}
-                    className="w-full py-4 border border-cyber-subtext/20 text-cyber-subtext hover:text-white hover:border-white transition-colors text-sm uppercase tracking-widest"
-                >
-                    Nova Análise
-                </button>
-            </div>
-        </div>
-    </div>
+      <div className="min-h-screen bg-black flex items-center justify-center">
+          <p className="text-white font-mono">Redirecionando para o painel...</p>
+          {setTimeout(() => setAppState('DASHBOARD'), 1000) && null}
+      </div>
   );
 
   return (
@@ -532,6 +843,8 @@ const App: React.FC = () => {
             <Footer />
         </>
       )}
+      {appState === 'LOGIN' && renderLogin()}
+      {appState === 'DASHBOARD' && user && renderDashboard()}
       {appState === 'UPLOAD' && renderUpload()}
       {appState === 'SCANNING' && renderScanning()}
       {appState === 'LOCKED' && renderLockedResult()}

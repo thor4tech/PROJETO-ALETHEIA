@@ -5,7 +5,13 @@ export interface AnalysisResult {
     analise_detalhada: string;
 }
 
-export type AppState = 'LANDING' | 'UPLOAD' | 'SCANNING' | 'LOCKED' | 'RESULT';
+export interface User {
+    id: string;
+    email: string;
+    credits: number;
+}
+
+export type AppState = 'LANDING' | 'LOGIN' | 'DASHBOARD' | 'UPLOAD' | 'SCANNING' | 'LOCKED' | 'RESULT';
 
 export interface TerminalLog {
     text: string;
