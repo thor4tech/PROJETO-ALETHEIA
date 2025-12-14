@@ -102,10 +102,10 @@ const App: React.FC = () => {
         setSelectedImage(base64);
         
         if (appState === 'DASHBOARD') {
-            // In dashboard mode, we just set the image, don't auto start fake analysis
+            // No dashboard apenas carrega a imagem
             setAnalysis(null);
         } else {
-            // Landing page flow -> Scanning -> Sales Page
+            // Na Landing Page, inicia a varredura fake que leva para a venda
             startAnalysis(base64);
         }
       };
@@ -122,7 +122,7 @@ const App: React.FC = () => {
     setLogs([]);
     setScanProgress(0);
 
-    // Simulation of scanning process with Haptic Feedback triggers
+    // Simulação da varredura que leva ao Checkout
     const steps = [
         { progress: 10, msg: "Iniciando mapeamento de nós faciais...", vibrate: [50] },
         { progress: 30, msg: "Convertendo imagem para escala de cinza de alto contraste...", vibrate: [50] },
@@ -138,7 +138,7 @@ const App: React.FC = () => {
 
     // Play animation logs
     for (let i = 0; i < steps.length; i++) {
-        await new Promise(resolve => setTimeout(resolve, 1200)); // Delay between steps
+        await new Promise(resolve => setTimeout(resolve, 800)); // Mais rápido para ir logo à venda
         
         addLog(steps[i].msg);
         setScanProgress(steps[i].progress);
@@ -172,16 +172,10 @@ const App: React.FC = () => {
       setLoginError("");
 
       try {
-          // Lógica de Admin Hardcoded para testes se o banco falhar, 
-          // mas idealmente ele deve existir no banco também.
-          if (loginEmail === 'thor4tech@gmail.com') {
-              // Pass through to query logic, but keep in mind rights are handled by 'isAdmin' const
-          }
-
           const q = query(
               collection(db, "users"),
               where("email", "==", loginEmail),
-              where("senha", "==", loginPass)
+              where("senha", "==", loginPass) // Busca pelo campo 'senha' conforme seu banco
           );
 
           const querySnapshot = await getDocs(q);
@@ -193,10 +187,12 @@ const App: React.FC = () => {
           const userDoc = querySnapshot.docs[0];
           const userData = { id: userDoc.id, ...userDoc.data() } as User;
 
-          // Admin não precisa de créditos > 0
-          if (userData.email !== 'thor4tech@gmail.com' && userData.credits <= 0) {
+          // Admin tem acesso livre, outros usuários precisam de crédito
+          const isAdminUser = userData.email === 'thor4tech@gmail.com';
+          
+          if (!isAdminUser && userData.credits <= 0) {
               alert("Sem créditos. Faça uma recarga.");
-              window.location.href = "https://pay.kiwify.com.br/RVDacih"; // Link do seu checkout
+              window.location.href = "https://pay.kiwify.com.br/RVDacih"; 
               setLoadingLogin(false);
               return;
           }
@@ -207,9 +203,9 @@ const App: React.FC = () => {
           console.error("Login error object:", err);
           
           if (err.code === 'permission-denied' || err.message?.includes("Missing or insufficient permissions")) {
-              setLoginError("ERRO DE PERMISSÃO: Verifique as 'Firestore Rules' no Console do Firebase. Elas devem permitir leitura pública para este modo de login manual.");
+              setLoginError("ERRO DE ACESSO: O Banco de Dados bloqueou a consulta. Verifique as Regras do Firestore.");
           } else {
-              setLoginError(err.message || "Erro ao conectar ao servidor.");
+              setLoginError("Email ou senha incorretos.");
           }
       } finally {
           setLoadingLogin(false);
@@ -253,8 +249,12 @@ const App: React.FC = () => {
 
       try {
           const userRef = doc(db, "users", user.id);
+          // Atualiza o campo 'senha' no banco
           await updateDoc(userRef, { senha: newPassword });
-          setUser({ ...user, senha: newPassword } as any); // Update local state mostly for consistency
+          
+          // Atualiza estado local
+          setUser({ ...user, senha: newPassword } as any); 
+          
           setNewPassword("");
           setSaveMessage("Senha alterada com sucesso!");
           setTimeout(() => setSaveMessage(""), 3000);
@@ -270,6 +270,8 @@ const App: React.FC = () => {
       setSelectedImage(null);
       setAnalysis(null);
       setShowSettings(false);
+      setLoginEmail("");
+      setLoginPass("");
   };
 
   // --- Sub-components ---
