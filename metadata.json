@@ -1,0 +1,5 @@
+{
+  "name": "Project Aletheia",
+  "description": "A dark, cyberpunk AI physiognomy analysis tool that reveals hidden character traits from photos using Gemini 3 Pro technology.",
+  "requestFramePermissions": []
+}
