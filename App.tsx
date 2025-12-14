@@ -1,8 +1,60 @@
-import React, { useState, useRef } from 'react';
-import { Scan, Upload, Lock, ShieldAlert, Fingerprint, BrainCircuit, AlertTriangle, CloudUpload, ScanFace, FileWarning, ArrowLeft } from 'lucide-react';
+import React, { useState, useRef, useEffect } from 'react';
+import { Scan, Upload, Lock, ShieldAlert, Fingerprint, BrainCircuit, AlertTriangle, CloudUpload, ScanFace, FileWarning, ArrowLeft, Unlock, CheckCircle } from 'lucide-react';
 import { AnalysisResult, AppState, TerminalLog } from './types';
 import { analyzeImage } from './services/gemini';
 import { Terminal } from './components/Terminal';
+
+// --- Social Proof Component ---
+const SocialToast = () => {
+    const [toast, setToast] = useState<{name: string, loc: string, action: string} | null>(null);
+    const [visible, setVisible] = useState(false);
+  
+    useEffect(() => {
+      const names = ["Júlia M.", "Roberto S.", "Carla F.", "Lucas P.", "Fernanda A.", "Marcos T.", "Larissa C.", "Pedro H."];
+      const locs = ["RJ", "SP", "MG", "RS", "BA", "SC", "PE", "PR"];
+      const actions = [
+          "acabou de detectar um perfil de Risco Alto",
+          "desbloqueou o dossiê completo",
+          "descobriu sinais de narcisismo",
+          "confirmou 98% de chance de traição",
+          "recebeu o alerta de dissimulação"
+      ];
+  
+      const showToast = () => {
+          const name = names[Math.floor(Math.random() * names.length)];
+          const loc = locs[Math.floor(Math.random() * locs.length)];
+          const action = actions[Math.floor(Math.random() * actions.length)];
+          setToast({ name, loc, action });
+          setVisible(true);
+          setTimeout(() => setVisible(false), 4000);
+      };
+  
+      // First toast after 5s, then every 15s
+      const initialTimer = setTimeout(showToast, 5000);
+      const interval = setInterval(showToast, 15000);
+  
+      return () => {
+          clearTimeout(initialTimer);
+          clearInterval(interval);
+      };
+    }, []);
+  
+    if (!visible || !toast) return null;
+  
+    return (
+      <div className="fixed bottom-4 left-4 z-50 bg-[#0a0a0a] border-l-4 border-cyber-green p-4 rounded shadow-[0_0_20px_rgba(0,0,0,0.8)] max-w-[80%] md:max-w-xs animate-slide-up backdrop-blur-md">
+          <div className="flex items-start gap-3">
+              <div className="w-2 h-2 rounded-full bg-cyber-green animate-pulse mt-1.5 shrink-0"></div>
+              <div>
+                  <p className="text-[10px] text-cyber-subtext uppercase font-mono">Prova Social em Tempo Real</p>
+                  <p className="text-xs text-white font-mono leading-tight">
+                      <span className="font-bold text-cyber-green">📍 {toast.name} ({toast.loc})</span> {toast.action}.
+                  </p>
+              </div>
+          </div>
+      </div>
+    );
+};
 
 const App: React.FC = () => {
   const [appState, setAppState] = useState<AppState>('LANDING');
@@ -10,18 +62,25 @@ const App: React.FC = () => {
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
   const [logs, setLogs] = useState<TerminalLog[]>([]);
   const [scanProgress, setScanProgress] = useState(0);
+  const [shaking, setShaking] = useState(false); // iOS Screen Shake State
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // --- Actions ---
 
   const handleStart = () => {
-    setAppState('UPLOAD');
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    // Directly open file selector if on mobile, or go to upload screen
+    if (window.innerWidth < 768) {
+        fileInputRef.current?.click();
+    } else {
+        setAppState('UPLOAD');
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
   };
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
+      console.log("PIXEL: Lead (Foto Carregada)"); // Simulated Pixel Event
       const reader = new FileReader();
       reader.onloadend = () => {
         const base64 = reader.result as string;
@@ -41,15 +100,15 @@ const App: React.FC = () => {
     setLogs([]);
     setScanProgress(0);
 
-    // Simulation of scanning process
+    // Simulation of scanning process with Haptic Feedback triggers
     const steps = [
-        { progress: 10, msg: "Iniciando mapeamento de nós faciais..." },
-        { progress: 30, msg: "Convertendo imagem para escala de cinza de alto contraste..." },
-        { progress: 45, msg: "Acessando banco de dados de arquétipos comportamentais..." },
-        { progress: 60, msg: "Analisando simetria da mandíbula e tensão ocular..." },
-        { progress: 75, msg: "Cruzando dados com Gemini 3 Pro Vision..." },
-        { progress: 90, msg: "ATENÇÃO: Padrão de dissimulação identificado." },
-        { progress: 100, msg: "Compilando relatório final..." }
+        { progress: 10, msg: "Iniciando mapeamento de nós faciais...", vibrate: [50] },
+        { progress: 30, msg: "Convertendo imagem para escala de cinza de alto contraste...", vibrate: [50] },
+        { progress: 45, msg: "Acessando banco de dados de arquétipos comportamentais...", vibrate: [100] },
+        { progress: 60, msg: "Analisando simetria da mandíbula e tensão ocular...", vibrate: [50, 50] },
+        { progress: 75, msg: "Cruzando dados com Gemini 3 Pro Vision...", vibrate: [100] },
+        { progress: 90, msg: "⚠️ ATENÇÃO: Padrão de dissimulação identificado.", vibrate: [500, 100, 500], shake: true },
+        { progress: 100, msg: "Compilando relatório final...", vibrate: [50] }
     ];
 
     // Trigger API call in parallel
@@ -57,14 +116,27 @@ const App: React.FC = () => {
 
     // Play animation logs
     for (let i = 0; i < steps.length; i++) {
-        await new Promise(resolve => setTimeout(resolve, 1500)); // Delay between steps
+        await new Promise(resolve => setTimeout(resolve, 1200)); // Delay between steps
+        
         addLog(steps[i].msg);
         setScanProgress(steps[i].progress);
+        
+        // Haptic Feedback
+        if (steps[i].vibrate && navigator.vibrate) {
+            navigator.vibrate(steps[i].vibrate);
+        }
+
+        // Screen Shake Logic (iOS/Visual impact)
+        if (steps[i].shake) {
+            setShaking(true);
+            setTimeout(() => setShaking(false), 600);
+        }
     }
 
     try {
         const result = await apiPromise;
         setAnalysis(result);
+        console.log("PIXEL: InitiateCheckout"); // Simulated Pixel Event
         setAppState('LOCKED');
     } catch (e) {
         addLog("ERRO CRÍTICO NO SISTEMA.");
@@ -103,6 +175,15 @@ const App: React.FC = () => {
       <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-[#1a1a2e] via-[#000000] to-[#000000] z-0"></div>
       <div className="absolute inset-0 cyber-grid opacity-30 z-0 pointer-events-none"></div>
       
+      {/* Hidden Input for Mobile Direct Action */}
+      <input 
+          type="file" 
+          ref={fileInputRef}
+          onChange={handleFileChange}
+          accept="image/*" 
+          className="hidden"
+      />
+
       <div className="z-10 text-center max-w-5xl mx-auto space-y-8 relative">
         <div className="absolute -top-20 left-1/2 -translate-x-1/2 w-[500px] h-[500px] bg-cyber-purple/20 blur-[100px] rounded-full pointer-events-none"></div>
 
@@ -113,18 +194,18 @@ const App: React.FC = () => {
           A IA VÊ O QUE VOCÊ <span className="inline-block text-cyber-red font-mono font-bold bg-black/80 px-3 py-1 border border-cyber-red/50 shadow-[0_0_20px_rgba(220,20,60,0.6)] animate-pulse">IGNORA</span>.
         </h2>
         
-        {/* New Tech Face Scanner Image */}
-        <div className="relative w-80 h-80 mx-auto my-12 group perspective-1000">
+        {/* Tech Face Scanner Image */}
+        <div className="relative w-72 h-72 md:w-80 md:h-80 mx-auto my-12 group perspective-1000">
              {/* Tech Frame */}
              <div className="absolute inset-0 border border-cyber-purple/30 bg-cyber-purple/5 rounded-xl transform rotate-3 transition-transform duration-1000 group-hover:rotate-0"></div>
              <div className="absolute inset-0 border border-cyber-green/30 bg-cyber-green/5 rounded-xl transform -rotate-3 transition-transform duration-1000 group-hover:rotate-0"></div>
              
-             {/* Main Image Container */}
+             {/* Main Image Container with Evil Animation */}
              <div className="absolute inset-0 bg-black rounded-xl overflow-hidden border-2 border-cyber-purple shadow-[0_0_50px_rgba(138,43,226,0.2)]">
                 <img 
                     src="https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?q=80&w=1000&auto=format&fit=crop" 
                     alt="Subject Analysis" 
-                    className="w-full h-full object-cover grayscale opacity-60 scale-110 group-hover:scale-100 transition-transform duration-[2s]"
+                    className="w-full h-full object-cover animate-evil-loop"
                 />
                 
                 {/* HUD Overlay */}
@@ -135,25 +216,13 @@ const App: React.FC = () => {
                     <div className="absolute top-[30%] right-[35%] w-1 h-1 bg-cyber-green shadow-[0_0_5px_#00FF94] animate-ping delay-300"></div>
                     <div className="absolute bottom-[40%] left-[40%] w-1 h-1 bg-cyber-red shadow-[0_0_5px_#DC143C] animate-ping delay-700"></div>
                     
-                    {/* Connecting Lines (SVG) */}
-                    <svg className="absolute inset-0 w-full h-full opacity-40">
-                        <path d="M100,100 L150,150 L200,100" fill="none" stroke="#8A2BE2" strokeWidth="1" className="animate-pulse" />
-                        <rect x="50" y="50" width="20" height="20" fill="none" stroke="#00FF94" strokeWidth="1" />
-                    </svg>
-
                     {/* Scanner Beam */}
                     <div className="absolute top-0 w-full h-2 bg-cyber-purple/80 shadow-[0_0_20px_#8A2BE2] animate-[scanline_3s_linear_infinite]"></div>
                 </div>
              </div>
-
-             {/* Corner Markers */}
-             <div className="absolute -top-2 -left-2 w-6 h-6 border-t-2 border-l-2 border-cyber-text z-30"></div>
-             <div className="absolute -top-2 -right-2 w-6 h-6 border-t-2 border-r-2 border-cyber-text z-30"></div>
-             <div className="absolute -bottom-2 -left-2 w-6 h-6 border-b-2 border-l-2 border-cyber-text z-30"></div>
-             <div className="absolute -bottom-2 -right-2 w-6 h-6 border-b-2 border-r-2 border-cyber-text z-30"></div>
              
              {/* Data Tag */}
-             <div className="absolute -right-12 top-10 bg-cyber-dark border border-cyber-purple/50 p-2 text-[10px] font-mono text-cyber-purple opacity-0 group-hover:opacity-100 transition-opacity delay-500">
+             <div className="absolute -right-8 top-10 bg-cyber-dark border border-cyber-purple/50 p-2 text-[10px] font-mono text-cyber-purple opacity-0 group-hover:opacity-100 transition-opacity delay-500 hidden md:block">
                 <p>ID: UNKNOWN</p>
                 <p>MATCH: 98%</p>
              </div>
@@ -165,15 +234,16 @@ const App: React.FC = () => {
 
         <button 
             onClick={handleStart}
-            className="group relative px-10 py-5 bg-transparent border border-cyber-purple text-white font-mono font-bold text-lg md:text-xl uppercase tracking-[0.2em] overflow-hidden transition-all hover:bg-cyber-purple hover:shadow-[0_0_40px_rgba(138,43,226,0.6)] active:scale-95"
+            className="group relative px-10 py-5 bg-transparent border border-cyber-purple text-white font-mono font-bold text-lg md:text-xl uppercase tracking-[0.2em] overflow-hidden transition-all hover:bg-cyber-purple active:scale-95 btn-neon animate-pulse"
         >
             <div className="absolute inset-0 bg-cyber-purple/20 translate-y-full group-hover:translate-y-0 transition-transform duration-300"></div>
             <span className="relative z-10 flex items-center justify-center gap-3">
-                <Scan className="w-6 h-6 animate-pulse" /> INICIAR VARREDURA
+                <Scan className="w-6 h-6" /> INICIAR VARREDURA
             </span>
         </button>
         <p className="text-[10px] text-cyber-subtext/60 tracking-widest mt-4"> // CRIPTOGRAFIA MILITAR // DADOS DELETADOS PÓS-ANÁLISE</p>
       </div>
+      <SocialToast />
     </div>
   );
 
@@ -273,7 +343,13 @@ const App: React.FC = () => {
   );
 
   const renderScanning = () => (
-    <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-black">
+    <div className={`min-h-screen flex flex-col items-center justify-center p-6 bg-black transition-all duration-300 ${shaking ? 'shake-screen bg-red-950/20' : ''}`}>
+        
+        {/* Shaking Red Overlay Alert */}
+        {shaking && (
+            <div className="fixed inset-0 border-[20px] border-cyber-red pointer-events-none z-50 animate-pulse opacity-50"></div>
+        )}
+
         <div className="relative w-64 h-64 md:w-80 md:h-80 mb-8 border-2 border-cyber-purple overflow-hidden rounded-lg shadow-[0_0_50px_rgba(138,43,226,0.2)]">
             {selectedImage && (
                 <img 
@@ -298,6 +374,7 @@ const App: React.FC = () => {
                 style={{ width: `${scanProgress}%` }}
             ></div>
         </div>
+        <p className="text-cyber-green font-mono text-xs mt-2 animate-pulse">PROCESSANDO BIOMETRIA...</p>
     </div>
   );
 
@@ -320,7 +397,7 @@ const App: React.FC = () => {
                     <img 
                         src={selectedImage} 
                         alt="Target" 
-                        className="w-full h-full object-cover grayscale blur-md" 
+                        className="w-full h-full object-cover grayscale blur-sm" 
                     />
                 )}
                 <div className="absolute inset-0 flex items-center justify-center bg-black/40">
@@ -328,11 +405,18 @@ const App: React.FC = () => {
                 </div>
             </div>
 
-            <div className="bg-[#1a0505] border border-cyber-red p-6 rounded-lg w-full text-center mb-8">
-                 <h3 className="text-xl text-white font-bold mb-2">3 RED FLAGS CRÍTICAS DETECTADAS</h3>
-                 <p className="text-cyber-subtext text-sm">
-                     A IA identificou padrões de micro-expressão preocupantes nesta pessoa. O relatório completo contém informações sensíveis sobre dissimulação e intenções ocultas.
+            <div className="bg-[#1a0505] border border-cyber-red p-6 rounded-lg w-full text-center mb-8 relative overflow-hidden">
+                 <h3 className="text-xl text-white font-bold mb-2 relative z-10">3 RED FLAGS CRÍTICAS DETECTADAS</h3>
+                 <p className="text-cyber-subtext text-sm relative z-10">
+                     A IA identificou padrões de micro-expressão preocupantes nesta pessoa. O relatório completo contém informações sensíveis.
                  </p>
+                 
+                 {/* Blurred "Fake" Data for Curiosity */}
+                 <div className="absolute inset-0 top-20 opacity-20 filter blur-sm pointer-events-none">
+                    <div className="flex justify-between px-10 mt-2 text-cyber-red font-mono text-xs"><span>NARCISISMO</span><span>98%</span></div>
+                    <div className="flex justify-between px-10 mt-2 text-cyber-red font-mono text-xs"><span>INFIDELIDADE</span><span>ALTO</span></div>
+                    <div className="flex justify-between px-10 mt-2 text-cyber-red font-mono text-xs"><span>AGRESSIVIDADE</span><span>MÉDIO</span></div>
+                 </div>
             </div>
 
             <div className="w-full bg-cyber-dark p-6 rounded-t-xl border-t border-l border-r border-cyber-subtext/20 shadow-2xl">
@@ -342,9 +426,9 @@ const App: React.FC = () => {
                      
                      <a 
                         href="https://pay.kiwify.com.br/RVDacih"
-                        className="w-full py-5 bg-cyber-red hover:bg-red-700 text-white font-bold text-lg uppercase tracking-wider rounded-lg btn-danger-neon flex items-center justify-center gap-2 text-center"
+                        className="w-full py-5 bg-cyber-red hover:bg-red-700 text-white font-bold text-lg uppercase tracking-wider rounded-lg btn-danger-neon flex items-center justify-center gap-2 text-center animate-pulse"
                      >
-                         <Lock className="w-5 h-5" /> Desbloquear a Verdade
+                         <Unlock className="w-5 h-5" /> Desbloquear a Verdade
                      </a>
                      
                      <div className="flex gap-4 mt-4 text-[#444] text-xs">
@@ -353,6 +437,7 @@ const App: React.FC = () => {
                      </div>
                  </div>
             </div>
+            <SocialToast />
         </div>
     </div>
   );

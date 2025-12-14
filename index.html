@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <title>ALETHEIA | Revelador de Caráter</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
@@ -26,6 +26,9 @@
               'scanline': 'scanline 2s linear infinite',
               'flicker': 'flicker 0.2s ease-in-out',
               'scroll': 'scroll 20s linear infinite',
+              'shake': 'shake 0.5s cubic-bezier(.36,.07,.19,.97) both',
+              'slide-up': 'slideUp 0.5s ease-out',
+              'evil-loop': 'evilLoop 4s ease-in-out infinite alternate',
             },
             keyframes: {
               scroll: {
@@ -39,6 +42,29 @@
               flicker: {
                 '0%': { opacity: '0.95' },
                 '100%': { opacity: '1' }
+              },
+              shake: {
+                '0%, 100%': { transform: 'translateX(0)' },
+                '10%, 30%, 50%, 70%, 90%': { transform: 'translateX(-5px)' },
+                '20%, 40%, 60%, 80%': { transform: 'translateX(5px)' }
+              },
+              slideUp: {
+                '0%': { transform: 'translateY(20px)', opacity: '0' },
+                '100%': { transform: 'translateY(0)', opacity: '1' }
+              },
+              evilLoop: {
+                '0%': { 
+                  filter: 'grayscale(100%) contrast(100%) brightness(110%) opacity(0.7)',
+                  transform: 'scale(1.1)'
+                },
+                '40%': {
+                  filter: 'grayscale(100%) contrast(100%) brightness(110%) opacity(0.7)',
+                  transform: 'scale(1.1)'
+                },
+                '100%': { 
+                  filter: 'grayscale(0%) sepia(100%) hue-rotate(-50deg) saturate(700%) contrast(200%) brightness(60%) opacity(1)',
+                  transform: 'scale(1.15)' 
+                }
               }
             }
           }
@@ -126,13 +152,14 @@
       }
 
       .btn-neon {
-        box-shadow: 0 0 5px #8A2BE2, 0 0 10px #8A2BE2;
+        box-shadow: 0 0 10px #8A2BE2, 0 0 20px #8A2BE2;
         transition: all 0.3s ease;
       }
       .btn-neon:hover {
-        box-shadow: 0 0 20px #8A2BE2, 0 0 40px #8A2BE2;
+        box-shadow: 0 0 30px #8A2BE2, 0 0 60px #8A2BE2;
         background-color: #8A2BE2;
         color: white;
+        text-shadow: 0 0 5px white;
       }
       
       .btn-danger-neon {
@@ -141,6 +168,12 @@
       }
       .btn-danger-neon:hover {
         box-shadow: 0 0 20px #DC143C, 0 0 40px #DC143C;
+      }
+
+      /* iOS Screen Shake Class */
+      .shake-screen {
+        animation: shake 0.5s cubic-bezier(.36,.07,.19,.97) both;
+        border: 2px solid #DC143C;
       }
     </style>
     <script type="importmap">
